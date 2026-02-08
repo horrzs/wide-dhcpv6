@@ -2,9 +2,9 @@ name: Build Android DHCPv6
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, android ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, android ]
   workflow_dispatch:
 
 jobs:
