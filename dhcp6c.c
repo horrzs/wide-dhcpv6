@@ -69,7 +69,6 @@
 #include <syslog.h>
 #include <unistd.h>
 
-
 #include <auth.h>
 #include <common.h>
 #include <config.h>
@@ -80,7 +79,6 @@
 #include <dhcp6c_ia.h>
 #include <prefixconf.h>
 #include <timer.h>
-
 
 static int debug = 0;
 static int exit_ok = 0;
@@ -499,6 +497,8 @@ static void client6_mainloop() {
   int ret, maxsock;
   fd_set r;
 
+  dprintf(LOG_DEBUG, FNAME, "entering main loop");
+
   while (1) {
     if (sig_flags)
       process_signals();
@@ -520,6 +520,9 @@ static void client6_mainloop() {
 
     w = dhcp6_check_timer();
 
+    dprintf(LOG_DEBUG, FNAME, "timer check done, w=%s",
+            w ? "set" : "NULL (infinite wait)");
+
     FD_ZERO(&r);
     FD_SET(sock, &r);
     maxsock = sock;
@@ -529,7 +532,11 @@ static void client6_mainloop() {
       (void)dhcp6_ctl_setreadfds(&r, &maxsock);
     }
 
+    dprintf(LOG_DEBUG, FNAME, "calling select, maxsock=%d", maxsock);
+
     ret = select(maxsock + 1, &r, NULL, NULL, w);
+
+    dprintf(LOG_DEBUG, FNAME, "select returned %d", ret);
 
     switch (ret) {
     case -1:
