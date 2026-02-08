@@ -1,0 +1,244 @@
+name: Build Android DHCPv6
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Android NDK
+      uses: nttld/setup-ndk@v1
+      id: setup-ndk
+      with:
+        ndk-version: r26b
+        add-to-path: true
+
+    - name: Create build directory
+      run: mkdir -p build/${{ matrix.abi }}
+
+    - name: Create CMakeLists.txt
+      run: |
+        cat > CMakeLists.txt << 'EOF'
+        cmake_minimum_required(VERSION 3.4.1)
+        project(wide-dhcpv6)
+
+        # --- dhcp6c 源文件 ---
+        add_executable(dhcp6c
+            missing/getifaddrs.c
+            addrconf.c
+            auth.c
+            base64.c
+            cfparse.c
+            cftoken.c
+            common.c
+            config.c
+            dhcp6_ctl.c
+            dhcp6c.c
+            dhcp6c_ia.c
+            dhcp6c_script.c
+            if.c
+            lease.c
+            prefixconf.c
+            timer.c
+        )
+
+        # --- dhcp6ctl 源文件 ---
+        add_executable(dhcp6ctl
+            auth.c
+            base64.c
+            dhcp6_ctlclient.c
+        )
+
+        # 包含目录
+        target_include_directories(dhcp6c PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/missing)
+        target_include_directories(dhcp6ctl PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/missing)
+
+        # --- dhcp6c 编译宏 ---
+        target_compile_definitions(dhcp6c PRIVATE
+            SYSCONFDIR="."
+            LOCALDBDIR="."
+            LINE_MAX=120
+            HAVE_GETADDRINFO=1
+            HAVE_GETNAMEINFO=1
+            HAVE_IF_NAMETOINDEX=1
+            HAVE_STRLCPY=1
+            HAVE_STRLCAT=1
+            HAVE_DAEMON=1
+            HAVE_WARNX=1
+            STDC_HEADERS=1
+            HAVE_SYS_TYPES_H=1
+            HAVE_SYS_STAT_H=1
+            HAVE_STDLIB_H=1
+            HAVE_STRING_H=1
+            HAVE_MEMORY_H=1
+            HAVE_STRINGS_H=1
+            HAVE_INTTYPES_H=1
+            HAVE_STDINT_H=1
+            HAVE_UNISTD_H=1
+            HAVE_FCNTL_H=1
+            HAVE_SYS_IOCTL_H=1
+            HAVE_SYS_TIME_H=1
+            HAVE_SYSLOG_H=1
+            HAVE_IFADDRS_H=1
+            TIME_WITH_SYS_TIME=1
+            HAVE_STRUCT_TM_TM_ZONE=1
+            HAVE_TM_ZONE=1
+            HAVE_SIG_ATOMIC_T=1
+            GETPGRP_VOID=1
+            SETPGRP_VOID=1
+            RETSIGTYPE=void
+            HAVE_MKTIME=1
+            HAVE_SELECT=1
+            HAVE_SOCKET=1
+            HAVE_CLOCK_GETTIME=1
+            HAVE_ARC4RANDOM=1
+            HAVE_ANSI_FUNC=1
+            HAVE_TAILQ_FOREACH_REVERSE_OLD=1
+            HAVE_STDARG_H=1
+        )
+
+        # --- dhcp6ctl 编译宏 ---
+        target_compile_definitions(dhcp6ctl PRIVATE
+            SYSCONFDIR="."
+            LOCALDBDIR="."
+            LINE_MAX=120
+            HAVE_STDARG_H=1
+            STDC_HEADERS=1
+        )
+
+        # --- 编译选项 ---
+        target_compile_options(dhcp6c PRIVATE -Wno-format-zero-length)
+        target_compile_options(dhcp6ctl PRIVATE -Wno-format-zero-length)
+
+        # C/C++ 标准
+        set_target_properties(dhcp6c PROPERTIES
+            C_STANDARD 99
+            C_STANDARD_REQUIRED YES
+        )
+        set_target_properties(dhcp6ctl PROPERTIES
+            C_STANDARD 99
+            C_STANDARD_REQUIRED YES
+        )
+
+        # --- 链接库 ---
+        find_library(log-lib log)
+        if(log-lib)
+            target_link_libraries(dhcp6c PRIVATE ${log-lib})
+            target_link_libraries(dhcp6ctl PRIVATE ${log-lib})
+        endif()
+        EOF
+
+    - name: Build with CMake
+      env:
+        ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+      run: |
+        cd build/${{ matrix.abi }}
+        cmake ../.. \
+          -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+          -DANDROID_ABI=${{ matrix.abi }} \
+          -DANDROID_PLATFORM=android-21 \
+          -DCMAKE_BUILD_TYPE=Release
+        cmake --build . --config Release
+
+    - name: Strip binaries
+      env:
+        ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+      run: |
+        # 根据 ABI 选择正确的 strip 工具
+        case "${{ matrix.abi }}" in
+          armeabi-v7a)
+            STRIP=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip
+            ;;
+          arm64-v8a)
+            STRIP=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip
+            ;;
+          x86)
+            STRIP=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip
+            ;;
+          x86_64)
+            STRIP=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip
+            ;;
+        esac
+        
+        $STRIP build/${{ matrix.abi }}/dhcp6c
+        $STRIP build/${{ matrix.abi }}/dhcp6ctl
+
+    - name: Prepare artifacts
+      run: |
+        mkdir -p artifacts/${{ matrix.abi }}
+        cp build/${{ matrix.abi }}/dhcp6c artifacts/${{ matrix.abi }}/
+        cp build/${{ matrix.abi }}/dhcp6ctl artifacts/${{ matrix.abi }}/
+        cp dhcp6c.conf.sample artifacts/${{ matrix.abi }}/dhcp6c.conf
+        
+        # 创建使用说明
+        cat > artifacts/${{ matrix.abi }}/README.txt << 'EOF'
+        DHCPv6 Client for Android
+        ==========================
+        
+        使用方法:
+        1. 将所有文件推送到设备:
+           adb push dhcp6c /data/local/tmp/dhcpv6/
+           adb push dhcp6ctl /data/local/tmp/dhcpv6/
+           adb push dhcp6c.conf /data/local/tmp/dhcpv6/
+        
+        2. 设置执行权限:
+           adb shell chmod 755 /data/local/tmp/dhcpv6/dhcp6c
+           adb shell chmod 755 /data/local/tmp/dhcpv6/dhcp6ctl
+        
+        3. 编辑配置文件 dhcp6c.conf
+        
+        4. 运行 dhcp6c:
+           adb shell
+           cd /data/local/tmp/dhcpv6
+           ./dhcp6c -Df wlan0
+        
+        注意:
+        - DUID 文件会自动生成在当前目录
+        - 配置文件必须与可执行文件在同一目录
+        - 需要 root 权限才能正常获取 IPv6 地址
+        EOF
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: dhcpv6-android-${{ matrix.abi }}
+        path: artifacts/${{ matrix.abi }}/
+
+  # 合并所有架构的构建产物
+  combine:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: all-artifacts
+
+    - name: Combine artifacts
+      run: |
+        mkdir -p combined
+        for abi in armeabi-v7a arm64-v8a x86 x86_64; do
+          if [ -d "all-artifacts/dhcpv6-android-$abi" ]; then
+            mkdir -p combined/$abi
+            cp -r all-artifacts/dhcpv6-android-$abi/* combined/$abi/
+          fi
+        done
+
+    - name: Upload combined artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: dhcpv6-android-all-abis
+        path: combined/
