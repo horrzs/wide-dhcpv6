@@ -505,15 +505,22 @@ static void client6_mainloop() {
 
 #ifdef __ANDROID__
     {
-      char buffer[1024];
-      ssize_t last;
-      while ((last = read(STDIN_FILENO, buffer, 1024)) > 0)
-        ;              // discard all inputs
-      if (last == 0) { // eof means parent process has gone, kill self
-        exit_ok = 1;
-        free_resources(NULL);
-        unlink(pid_file);
-        check_exit();
+      /* Check STDIN for EOF using select with zero timeout */
+      fd_set stdin_fds;
+      struct timeval zero_timeout = {0, 0};
+      FD_ZERO(&stdin_fds);
+      FD_SET(STDIN_FILENO, &stdin_fds);
+      if (select(STDIN_FILENO + 1, &stdin_fds, NULL, NULL, &zero_timeout) > 0) {
+        char buffer[1024];
+        ssize_t last;
+        while ((last = read(STDIN_FILENO, buffer, 1024)) > 0)
+          ;              // discard all inputs
+        if (last == 0) { // eof means parent process has gone, kill self
+          exit_ok = 1;
+          free_resources(NULL);
+          unlink(pid_file);
+          check_exit();
+        }
       }
     }
 #endif
