@@ -380,8 +380,8 @@ jobs:
         )
 
         # --- 编译选项 ---
-        target_compile_options(dhcp6c PRIVATE -Wno-format-zero-length)
-        target_compile_options(dhcp6ctl PRIVATE -Wno-format-zero-length)
+        target_compile_options(dhcp6c PRIVATE -Wno-format-zero-length -Wno-implicit-function-declaration -Wno-deprecated-non-prototype)
+        target_compile_options(dhcp6ctl PRIVATE -Wno-format-zero-length -Wno-implicit-function-declaration -Wno-deprecated-non-prototype)
 
         # C/C++ 标准
         set_target_properties(dhcp6c PROPERTIES
